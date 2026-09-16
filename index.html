@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WoW Crafting & Konzentrations-Dashboard</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Vue.js 3 CDN -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Wowhead Tooltips -->
+    <script>const whTooltips = { colorLinks: true, iconizeLinks: true, renameLinks: true };</script>
+    <script src="https://wow.zamimg.com/js/tooltips.js" async></script>
+    
+    <style>
+        body {
+            background-color: #0b0f19;
+            background-image: radial-gradient(circle at 50% 20%, #1e1b4b 0%, #0b0f19 100%);
+            color: #f3f4f6;
+            min-height: 100vh;
+        }
+        .glass-panel {
+            background: rgba(17, 24, 39, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div id="app" class="max-w-7xl mx-auto space-y-6">
+
+        <!-- HEADER & MASTER MODUS -->
+        <header class="glass-panel p-6 rounded-2xl flex flex-col md:flex-row justify-between items-center gap-4 shadow-2xl">
+            <div>
+                <h1 class="text-2xl font-bold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-amber-300">
+                    WoW Midnight Crafting Dashboard
+                </h1>
+                <p class="text-xs text-slate-400 mt-1">Live-Ø-Preise • Konzentrations-Optimierer • M+ Warenkorb</p>
+            </div>
+
+            <!-- Master Slider (Normal vs Konzentration) -->
+            <div class="flex items-center gap-3 bg-slate-900/80 p-2 rounded-xl border border-slate-700/50">
+                <span class="text-xs font-medium" :class="mode === 'normal' ? 'text-amber-400 font-bold' : 'text-slate-400'">Massenproduktion</span>
+                <button @click="toggleMode" class="relative w-14 h-7 bg-slate-800 rounded-full transition p-1 border border-slate-600 focus:outline-none">
+                    <div class="w-5 h-5 bg-amber-400 rounded-full shadow-md transform transition" :class="mode === 'concentration' ? 'translate-x-7 bg-purple-400' : 'translate-x-0'"></div>
+                </button>
+                <span class="text-xs font-medium" :class="mode === 'concentration' ? 'text-purple-400 font-bold' : 'text-slate-400'">Konzentration (Weekly)</span>
+            </div>
+        </header>
+
+        <!-- MAIN GRID (Sidebar + Table + Cart) -->
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+
+            <!-- LINKE SEITENLEISTE: CHARAKTER & STATS -->
+            <aside class="glass-panel p-5 rounded-2xl space-y-5 lg:col-span-1 shadow-xl">
+                <h2 class="text-sm font-semibold uppercase tracking-wider text-purple-300 border-b border-slate-700/60 pb-2">Berufs-Einstellungen</h2>
+                
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Ausgewählter Beruf</label>
+                    <select v-model="selectedProfession" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm focus:outline-none focus:border-purple-500">
+                        <option value="all">Alle Midnight-Berufe</option>
+                        <option value="alchemy">Alchemie (Flasks, Phials & Tränke)</option>
+                        <option value="enchanting">Verzauberkunst (Enchants)</option>
+                        <option value="inscription">Inschriftenkunde</option>
+                        <option value="jewelcrafting">Juwelierkunst</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Basis-Skill im Rezept</label>
+                    <input type="number" v-model.number="charStats.baseSkill" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm focus:outline-none focus:border-purple-500">
+                </div>
+
+                <div v-if="mode === 'normal'">
+                    <label class="block text-xs text-slate-400 mb-1">Multicraft Chance (%)</label>
+                    <input type="number" step="0.1" v-model.number="charStats.multicraft" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm focus:outline-none focus:border-purple-500">
+                </div>
+
+                <div v-if="mode === 'normal'">
+                    <label class="block text-xs text-slate-400 mb-1">Ressourcenersparnis (%)</label>
+                    <input type="number" step="0.1" v-model.number="charStats.resourcefulness" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm focus:outline-none focus:border-purple-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Verfügbare Konzentration</label>
+                    <input type="number" v-model.number="charStats.availableConcentration" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm focus:outline-none focus:border-purple-500">
+                </div>
+
+                <div class="pt-2">
+                        <select v-model="apiRegion" class="w-full mb-2 bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs focus:outline-none focus:border-purple-500">
+                            <option value="EU">Region: Europa</option>
+                            <option value="NA">Region: Nordamerika</option>
+                        </select>
+                        <button @click="loadRecipeCatalog" :disabled="recipeCatalogLoading" class="w-full mb-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-60 border border-slate-600 text-xs font-semibold py-2.5 px-4 rounded-xl transition">
+                            {{ recipeCatalogLoading ? 'Wowhead-Rezepte werden geladen...' : 'Midnight-Rezepte laden' }}
+                        </button>
+                        <button @click="loadLiveData" :disabled="apiLoading" class="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-60 text-xs font-semibold py-2.5 px-4 rounded-xl transition shadow-lg">
+                        {{ apiLoading ? 'Midnight-Daten werden geladen...' : 'Midnight-Daten aktualisieren' }}
+                    </button>
+                        <p class="text-[10px] text-slate-500 mt-2">{{ apiStatus }}</p>
+                </div>
+            </aside>
+
+            <!-- MITTELTEIL: HAUPTTABELLE (PROFIT MATRIX) -->
+            <main class="glass-panel p-5 rounded-2xl lg:col-span-2 space-y-4 shadow-xl flex flex-col">
+                <div class="flex justify-between items-center">
+                    <h2 class="text-sm font-semibold uppercase tracking-wider text-amber-300">Rezept-Datenbank & Markt</h2>
+                    <input type="text" v-model="searchQuery" placeholder="Rezept suchen..." class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-amber-500 w-48">
+                </div>
+
+                <div class="overflow-x-auto flex-grow">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead>
+                            <tr class="border-b border-slate-700 text-slate-400">
+                                <th class="p-2.5">Rezept / Item</th>
+                                <th class="p-2.5 text-right">Verkauf (Live-Ø)</th>
+                                <th class="p-2.5 text-right">Mats</th>
+                                <th class="p-2.5 text-right" v-if="mode === 'normal'">Profit / Marge</th>
+                                <th class="p-2.5 text-right" v-else>Gold pro Konz. (GpC)</th>
+                                <th class="p-2.5 text-center">Warenkorb</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800/60">
+                            <tr v-for="recipe in filteredRecipes" :key="recipe.id" class="hover:bg-slate-800/40 transition">
+                                <td class="p-2.5 font-medium">
+                                    <a :href="'https://www.wowhead.com/item=' + recipe.itemId" class="text-amber-400 hover:underline" target="_blank">{{ recipe.name }}</a>
+                                    <div class="text-[10px] text-slate-400">Sell Rate: <span class="text-emerald-400">{{ recipe.sellRate }}</span></div>
+                                </td>
+                                <td class="p-2.5 text-right font-mono text-slate-200">{{ formatGold(recipe.sellPrice) }}g</td>
+                                <td class="p-2.5 text-right font-mono text-slate-300">{{ formatGold(calculateMatCost(recipe)) }}g</td>
+                                
+                                <!-- Normal Mode Spalte -->
+                                <td class="p-2.5 text-right font-mono" v-if="mode === 'normal'">
+                                    <div :class="calculateProfit(recipe) >= 0 ? 'text-emerald-400' : 'text-rose-400'">
+                                        {{ formatGold(calculateProfit(recipe)) }}g
+                                    </div>
+                                    <div class="text-[10px] text-slate-400">{{ calculateROI(recipe) }}% ROI</div>
+                                </td>
+
+                                <!-- Concentration Mode Spalte -->
+                                <td class="p-2.5 text-right font-mono" v-else>
+                                    <div class="text-purple-300 font-bold">
+                                        {{ calculateGpC(recipe) }} GpC
+                                    </div>
+                                    <div class="text-[10px] text-slate-400">Kosten: {{ calculateConcentrationCost(recipe) }} Konz.</div>
+                                </td>
+
+                                <td class="p-2.5 text-center">
+                                    <button @click="addToCart(recipe)" class="bg-slate-800 hover:bg-slate-700 border border-slate-600 text-amber-300 px-2 py-1 rounded-md text-[10px] font-bold transition">
+                                        +
+                                    </button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </main>
+
+            <!-- RECHTE SEITENLEISTE: SMARTER WARENKORB (EIGENBEDARF) -->
+            <aside class="glass-panel p-5 rounded-2xl lg:col-span-1 space-y-4 shadow-xl flex flex-col justify-between">
+                <div>
+                    <h2 class="text-sm font-semibold uppercase tracking-wider text-emerald-300 border-b border-slate-700/60 pb-2 flex justify-between items-center">
+                        <span>M+ Warenkorb</span>
+                        <span class="text-[10px] bg-emerald-900/60 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-700/50">Worst-Case</span>
+                    </h2>
+
+                    <div v-if="cart.length === 0" class="text-xs text-slate-500 py-10 text-center">
+                        Klicke in der Tabelle auf <strong class="text-amber-400">+</strong>, um Items für den Eigenbedarf hinzuzufügen.
+                    </div>
+
+                    <div v-else class="space-y-3 mt-3 max-h-64 overflow-y-auto pr-1">
+                        <div v-for="(item, index) in cart" :key="index" class="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800 text-xs space-y-1">
+                            <div class="flex justify-between items-start">
+                                <span class="font-medium text-slate-200">{{ item.name }}</span>
+                                <button @click="removeFromCart(index)" class="text-rose-400 hover:text-rose-300 font-bold text-[10px]">✕</button>
+                            </div>
+                            <div class="flex justify-between items-center text-[11px] text-slate-400">
+                                <span>Menge:</span>
+                                <input type="number" v-model.number="item.quantity" min="1" class="w-12 bg-slate-800 border border-slate-700 rounded text-center text-xs py-0.5">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Warenkorb Fazit / Craft vs Buy -->
+                <div v-if="cart.length > 0" class="bg-slate-900/80 p-3.5 rounded-xl border border-slate-700/60 space-y-2">
+                    <div class="flex justify-between text-xs">
+                        <span class="text-slate-400">AH Direktkauf:</span>
+                        <span class="font-mono font-bold text-slate-200">{{ formatGold(cartTotalBuyCost) }}g</span>
+                    </div>
+                    <div class="flex justify-between text-xs">
+                        <span class="text-slate-400">Selber Craften:</span>
+                        <span class="font-mono font-bold text-amber-300">{{ formatGold(cartTotalCraftCost) }}g</span>
+                    </div>
+                    <div class="border-t border-slate-800 pt-2 flex justify-between items-center">
+                        <span class="text-xs font-bold text-slate-300">Ersparnis:</span>
+                        <span class="font-mono text-xs font-bold" :class="cartSavings >= 0 ? 'text-emerald-400' : 'text-rose-400'">
+                            {{ formatGold(cartSavings) }}g
+                        </span>
+                    </div>
+                </div>
+            </aside>
+
+        </div>
+
+    </div>
+
+    <!-- VUE LOGIK SCRIPT -->
+    <script>
+        const { createApp, ref, computed } = Vue;
+
+        createApp({
+            setup() {
+                const mode = ref('normal'); // 'normal' oder 'concentration'
+                const searchQuery = ref('');
+                const selectedProfession = ref('all');
+                const apiRegion = ref(localStorage.getItem('wow-midnight-region') || 'EU');
+                const apiLoading = ref(false);
+                const recipeCatalogLoading = ref(false);
+                const apiStatus = ref('Noch kein Live-Import geladen.');
+                const apiEndpoint = window.location.protocol === 'file:'
+                    ? 'https://docs.saddlebagexchange.com/api/wow/tsmstats'
+                    : '/api/saddlebag';
+                const cacheKey = 'wow-midnight-dashboard-live-cache';
+                const cacheDuration = 60 * 60 * 1000;
+                const livePrices = ref({});
+
+                const charStats = ref({
+                    baseSkill: 100,
+                    multicraft: 12.5,
+                    resourcefulness: 8.0,
+                    availableConcentration: 1000
+                });
+
+                // Midnight-Rezeptkatalog; Marktpreise werden beim Live-Import aktualisiert.
+                const recipes = ref([
+                    { id: 1, name: "Silvermoon Health Potion", itemId: 241305, profession: "alchemy", difficulty: 100, sellPrice: 1800, matCostNormal: 1200, matCostCheap: 850, sellRate: "Sehr hoch", multicraftEligible: true },
+                    { id: 7, name: "Refreshing Serum", itemId: 241307, profession: "alchemy", difficulty: 100, sellPrice: 2100, matCostNormal: 1400, matCostCheap: 950, sellRate: "Hoch", multicraftEligible: true },
+                    { id: 8, name: "Amani Extract", itemId: 241299, profession: "alchemy", difficulty: 100, sellPrice: 2600, matCostNormal: 1700, matCostCheap: 1150, sellRate: "Mittel", multicraftEligible: true },
+                    { id: 2, name: "Flask of the Magisters", itemId: 241323, profession: "alchemy", difficulty: 100, sellPrice: 6200, matCostNormal: 4300, matCostCheap: 3000, sellRate: "Hoch", multicraftEligible: true },
+                    { id: 3, name: "Haranir Phial of Ingenuity", itemId: 241313, profession: "alchemy", difficulty: 100, sellPrice: 5400, matCostNormal: 3600, matCostCheap: 2500, sellRate: "Mittel", multicraftEligible: true },
+                    { id: 4, name: "Flask of Thalassian Resistance", itemId: 241321, profession: "alchemy", difficulty: 100, sellPrice: 4800, matCostNormal: 3300, matCostCheap: 2300, sellRate: "Mittel", multicraftEligible: true },
+                    { id: 5, name: "Enchant Tool - Ren'dorei Ingenuity", itemId: 244025, profession: "enchanting", difficulty: 100, sellPrice: 8500, matCostNormal: 6100, matCostCheap: 4300, sellRate: "Mittel", multicraftEligible: false },
+                    { id: 6, name: "Smuggler's Enchanted Edge", itemId: 243737, profession: "enchanting", difficulty: 100, sellPrice: 3200, matCostNormal: 2200, matCostCheap: 1500, sellRate: "Hoch", multicraftEligible: false },
+                    { id: 9, name: "Codified Azeroot", itemId: 245762, profession: "inscription", difficulty: 100, sellPrice: 1400, matCostNormal: 950, matCostCheap: 650, sellRate: "Hoch", multicraftEligible: true },
+                    { id: 10, name: "Soul Cipher", itemId: 245764, profession: "inscription", difficulty: 100, sellPrice: 2200, matCostNormal: 1500, matCostCheap: 1000, sellRate: "Mittel", multicraftEligible: true },
+                    { id: 11, name: "Thalassian Treatise on Blacksmithing", itemId: 245763, profession: "inscription", difficulty: 100, sellPrice: 18000, matCostNormal: 12500, matCostCheap: 8500, sellRate: "Sehr hoch", multicraftEligible: false },
+                    { id: 12, name: "Thalassian Treatise on Inscription", itemId: 245757, profession: "inscription", difficulty: 100, sellPrice: 18000, matCostNormal: 12500, matCostCheap: 8500, sellRate: "Sehr hoch", multicraftEligible: false },
+                    { id: 13, name: "Vantus Rune: Tides", itemId: 272195, profession: "inscription", difficulty: 100, sellPrice: 9500, matCostNormal: 6500, matCostCheap: 4500, sellRate: "Hoch", multicraftEligible: true },
+                    { id: 14, name: "Contract: Zul'jarra's Forces", itemId: 277968, profession: "inscription", difficulty: 100, sellPrice: 7200, matCostNormal: 5000, matCostCheap: 3400, sellRate: "Mittel", multicraftEligible: true },
+                    { id: 15, name: "Masterful Lapis", itemId: 240886, profession: "jewelcrafting", difficulty: 100, sellPrice: 12000, matCostNormal: 8200, matCostCheap: 5600, sellRate: "Hoch", multicraftEligible: true },
+                    { id: 16, name: "Powerful Eversong Diamond", itemId: 240967, profession: "jewelcrafting", difficulty: 100, sellPrice: 26000, matCostNormal: 18000, matCostCheap: 12000, sellRate: "Mittel", multicraftEligible: true },
+                    { id: 17, name: "Telluric Eversong Diamond", itemId: 240969, profession: "jewelcrafting", difficulty: 100, sellPrice: 26000, matCostNormal: 18000, matCostCheap: 12000, sellRate: "Mittel", multicraftEligible: true },
+                    { id: 18, name: "Sunglass Vial", itemId: 240990, profession: "jewelcrafting", difficulty: 100, sellPrice: 3200, matCostNormal: 2200, matCostCheap: 1500, sellRate: "Hoch", multicraftEligible: true },
+                    { id: 19, name: "Sin'dorei Lens", itemId: 240973, profession: "jewelcrafting", difficulty: 100, sellPrice: 4800, matCostNormal: 3300, matCostCheap: 2300, sellRate: "Mittel", multicraftEligible: true },
+                    { id: 20, name: "Polished Ammolite", itemId: 273065, profession: "jewelcrafting", difficulty: 100, sellPrice: 15000, matCostNormal: 10000, matCostCheap: 6800, sellRate: "Mittel", multicraftEligible: true }
+                ]);
+
+                const cart = ref([]);
+
+                const applyLivePrices = (data) => {
+                    const priceField = apiRegion.value === 'EU' ? 'eu_average_price' : 'na_average_price';
+                    const saleRateField = apiRegion.value === 'EU' ? 'eu_sale_rate' : 'na_sale_rate';
+                    const liveById = new Map(data.map(item => [Number(item.itemID), item]));
+                    livePrices.value = Object.fromEntries(data.map(item => [
+                        Number(item.itemID), Number(item[priceField]) || 0
+                    ]));
+
+                    recipes.value.forEach(recipe => {
+                        const liveItem = liveById.get(recipe.itemId);
+                        if (!liveItem) return;
+                        if (Number.isFinite(Number(liveItem[priceField]))) {
+                            recipe.sellPrice = Number(liveItem[priceField]);
+                        }
+                        if (Number.isFinite(Number(liveItem[saleRateField]))) {
+                            recipe.sellRate = `${Number(liveItem[saleRateField]).toFixed(1)} / Tag`;
+                        }
+                    });
+                };
+
+                const loadCachedLiveData = () => {
+                    try {
+                        const cached = JSON.parse(localStorage.getItem(cacheKey));
+                        if (!cached || !Array.isArray(cached.data)) return false;
+                        apiRegion.value = cached.region || apiRegion.value;
+                        applyLivePrices(cached.data);
+                        apiStatus.value = `Live-Ø aus Cache (${new Date(cached.updatedAt).toLocaleString('de-DE')})`;
+                        return Date.now() - cached.updatedAt < cacheDuration;
+                    } catch {
+                        localStorage.removeItem(cacheKey);
+                        return false;
+                    }
+                };
+
+                const loadLiveData = async () => {
+                    const cachedIsFresh = loadCachedLiveData();
+                    if (cachedIsFresh) {
+                        apiStatus.value += ' • nächster Abruf nach einer Stunde';
+                        return;
+                    }
+
+                    apiLoading.value = true;
+                    apiStatus.value = 'Live-Import wird von Saddlebag Exchange geladen...';
+                    localStorage.setItem('wow-midnight-region', apiRegion.value);
+                    try {
+                        const response = await fetch(apiEndpoint, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                item_ids: [...new Set([
+                                    ...recipes.value.map(recipe => recipe.itemId),
+                                    ...recipes.value.flatMap(recipe => (recipe.reagents || []).map(reagent => reagent.itemId || reagent.itemID))
+                                ].filter(Boolean))],
+                                pets: false,
+                                game_edition: 'retail'
+                            })
+                        });
+                        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                        const payload = await response.json();
+                        if (!Array.isArray(payload.data)) throw new Error('Unerwartetes API-Format');
+                        applyLivePrices(payload.data);
+                        const updatedAt = Date.now();
+                        localStorage.setItem(cacheKey, JSON.stringify({
+                            expansion: 'Midnight',
+                            region: apiRegion.value,
+                            updatedAt,
+                            data: payload.data
+                        }));
+                        apiStatus.value = `Live-Ø aktualisiert (${new Date(updatedAt).toLocaleString('de-DE')}) • Cache: 1 Stunde`;
+                    } catch (error) {
+                        const corsHint = window.location.protocol === 'file:'
+                            ? ' Lokale Datei: bitte über Vercel/GitHub Pages mit Proxy öffnen.'
+                            : ' Prüfe, ob /api/saddlebag deployed ist.';
+                        apiStatus.value = `Live-Import fehlgeschlagen: ${error.message}.${corsHint}`;
+                    } finally {
+                        apiLoading.value = false;
+                    }
+                };
+
+                const loadRecipeCatalog = async () => {
+                    if (window.location.protocol === 'file:') {
+                        apiStatus.value = 'Rezeptimport benötigt das Vercel-Deployment mit /api/recipes.';
+                        return;
+                    }
+                    recipeCatalogLoading.value = true;
+                    apiStatus.value = 'Midnight-Rezepte werden aus Wowhead geladen...';
+                    try {
+                        const response = await fetch('/api/recipes');
+                        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                        const payload = await response.json();
+                        if (!Array.isArray(payload.recipes) || payload.recipes.length === 0) {
+                            throw new Error('Keine Rezepte gefunden');
+                        }
+                        recipes.value = payload.recipes;
+                        selectedProfession.value = 'all';
+                        localStorage.removeItem(cacheKey);
+                        apiStatus.value = `${recipes.value.length} Midnight-Rezepte geladen. Livepreise jetzt aktualisieren.`;
+                        await loadLiveData();
+                    } catch (error) {
+                        apiStatus.value = `Rezeptimport fehlgeschlagen: ${error.message}`;
+                    } finally {
+                        recipeCatalogLoading.value = false;
+                    }
+                };
+
+                loadCachedLiveData();
+                if (window.location.protocol !== 'file:') loadRecipeCatalog();
+
+                const toggleMode = () => {
+                    mode.value = mode.value === 'normal' ? 'concentration' : 'normal';
+                };
+
+                const filteredRecipes = computed(() => {
+                    return recipes.value.filter(r => 
+                        (selectedProfession.value === 'all' || r.profession === selectedProfession.value) &&
+                        r.name.toLowerCase().includes(searchQuery.value.toLowerCase())
+                    );
+                });
+
+                const formatGold = (val) => {
+                    return val.toLocaleString('de-DE', { maximumFractionDigits: 0 });
+                };
+
+                // Materialkosten je nach Modus (Normal nutzt teure R3 Mats, Konz nutzt günstige R1/R2 Mats)
+                const calculateMatCost = (recipe) => {
+                    if (recipe.reagents && recipe.reagents.length > 0) {
+                        const liveCost = recipe.reagents.reduce((sum, reagent) => {
+                            const reagentId = reagent.itemId || reagent.itemID;
+                            const quantity = Number(reagent.quantity || reagent.count || 0);
+                            return sum + (livePrices.value[reagentId] || 0) * quantity;
+                        }, 0);
+                        if (liveCost > 0) return liveCost;
+                    }
+                    const baseCost = mode.value === 'normal' ? recipe.matCostNormal : recipe.matCostCheap;
+                    const resourcefulnessFactor = mode.value === 'normal'
+                        ? 1 - (charStats.value.resourcefulness / 100) * 0.3
+                        : 1;
+                    return baseCost * resourcefulnessFactor;
+                };
+
+                // AH-Gebühr von 5% wird abgezogen
+                const calculateEffectiveSellPrice = (recipe) => {
+                    return recipe.sellPrice * 0.95;
+                };
+
+                // Verzauberungen profitieren nicht von Multicraft; Alchemie nutzt den statistischen Ertrag.
+                const calculateProfit = (recipe) => {
+                    const rev = calculateEffectiveSellPrice(recipe);
+                    const cost = calculateMatCost(recipe);
+                    const bonusMultiplier = recipe.multicraftEligible
+                        ? 1 + (charStats.value.multicraft / 100) * 0.3
+                        : 1;
+                    return (rev * bonusMultiplier) - cost;
+                };
+
+                const calculateROI = (recipe) => {
+                    const cost = calculateMatCost(recipe);
+                    const profit = calculateProfit(recipe);
+                    if (cost <= 0) return 0;
+                    return ((profit / cost) * 100).toFixed(1);
+                };
+
+                // Konzentrationskosten basierend auf der Lücke zwischen Basis-Skill und Schwierigkeit
+                const calculateConcentrationCost = (recipe) => {
+                    const gap = Math.max(0, recipe.difficulty - charStats.value.baseSkill);
+                    return Math.max(50, gap * 8 + 50);
+                };
+
+                // Gold pro Konzentration (GpC)
+                const calculateGpC = (recipe) => {
+                    const rev = calculateEffectiveSellPrice(recipe);
+                    const cost = recipe.matCostCheap; // Günstige Mats
+                    const profit = rev - cost;
+                    const konz = calculateConcentrationCost(recipe);
+                    if (konz <= 0) return 0;
+                    return (profit / konz).toFixed(1);
+                };
+
+                const addToCart = (recipe) => {
+                    const existing = cart.value.find(item => item.id === recipe.id);
+                    if (existing) {
+                        existing.quantity += 1;
+                    } else {
+                        cart.value.push({ ...recipe, quantity: 5 }); // Standardmässig 5er Charge
+                    }
+                };
+
+                const removeFromCart = (index) => {
+                    cart.value.splice(index, 1);
+                };
+
+                // Garantiertes Worst-Case Szenario für den M+ Eigenbedarf (keine Proccs eingerechnet)
+                const cartTotalBuyCost = computed(() => {
+                    return cart.value.reduce((sum, item) => sum + (item.sellPrice * item.quantity), 0);
+                });
+
+                const cartTotalCraftCost = computed(() => {
+                    return cart.value.reduce((sum, item) => sum + (calculateMatCost(item) * item.quantity), 0);
+                });
+
+                const cartSavings = computed(() => {
+                    return cartTotalBuyCost.value - cartTotalCraftCost.value;
+                });
+
+                return {
+                    mode,
+                    searchQuery,
+                    selectedProfession,
+                    charStats,
+                    filteredRecipes,
+                    toggleMode,
+                    formatGold,
+                    calculateMatCost,
+                    calculateProfit,
+                    calculateROI,
+                    calculateConcentrationCost,
+                    calculateGpC,
+                    addToCart,
+                    removeFromCart,
+                    cart,
+                    cartTotalBuyCost,
+                    cartTotalCraftCost,
+                    cartSavings,
+                    apiRegion,
+                    apiLoading,
+                    recipeCatalogLoading,
+                    apiStatus,
+                    loadLiveData,
+                    loadRecipeCatalog
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
